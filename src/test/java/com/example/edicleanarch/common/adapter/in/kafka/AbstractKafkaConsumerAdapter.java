@@ -1,0 +1,75 @@
+package com.example.edicleanarch.common.adapter.in.kafka;
+
+import com.example.edicleanarch.common.model.ProcessingResult;
+import com.example.edicleanarch.common.port.in.ProcessEdiFileCommand;
+import com.example.edicleanarch.common.port.in.ProcessEdiFileUseCase;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.springframework.kafka.support.Acknowledgment;
+
+/**
+ * Abstract Kafka Consumer Adapter
+ * Base class for all EDI Kafka consumers.
+ *
+ * @param <C> Command type
+ */
+@Slf4j
+public abstract class AbstractKafkaConsumerAdapter<C extends ProcessEdiFileCommand> {
+
+    protected abstract ProcessEdiFileUseCase<C> getUseCase();
+
+    protected abstract C parseMessage(ConsumerRecord<String, String> record);
+
+    protected abstract String getMessageType();
+
+    /**
+     * Common message handling logic.
+     */
+    protected void handleMessage(ConsumerRecord<String, String> record, Acknowledgment acknowledgment) {
+        log.info("Received {} message: topic={}, partition={}, offset={}, key={}",
+                getMessageType(), record.topic(), record.partition(), record.offset(), record.key());
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            C command = parseMessage(record);
+            ProcessingResult result = getUseCase().processFile(command);
+
+            if (result.isSuccess() || result.isPartialSuccess()) {
+                log.info("Processed {} message: key={}, records={}, success={}, failed={}, duration={}ms",
+                        getMessageType(),
+                        record.key(),
+                        result.getRecordCount(),
+                        result.getSuccessCount(),
+                        result.getFailedCount(),
+                        System.currentTimeMillis() - startTime);
+                acknowledgment.acknowledge();
+            } else {
+                log.error("Failed to process {} message: key={}, error={}",
+                        getMessageType(), record.key(), result.getErrorMessage());
+                handleProcessingFailure(record, result);
+            }
+
+        } catch (Exception e) {
+            log.error("Error processing {} message: key={}", getMessageType(), record.key(), e);
+            handleException(record, e);
+        }
+    }
+    /**
+     * Handle processing failure. Override to customize behavior.
+     */
+    protected void handleProcessingFailure(ConsumerRecord<String, String> record, ProcessingResult result) {
+        log.warn("Processing failed for {} message key={}, errors={}",
+                getMessageType(), record.key(), result.getValidationErrors());
+        // Default: log and don't acknowledge (will be retried or sent to DLQ)
+    }
+
+    /**
+     * Handle exception. Override to customize behavior.
+     */
+    protected void handleException(ConsumerRecord<String, String> record, Exception e) {
+        log.error("Exception processing {} message key={}: {}",
+                getMessageType(), record.key(), e.getMessage());
+        // Default: log and don't acknowledge (will be retried or sent to DLQ)
+    }
+}

@@ -1,0 +1,204 @@
+package com.example.edicleanarch.railinc.domain.service;
+
+import com.example.edicleanarch.common.parser.FixedWidthToJsonConverter;
+import com.example.edicleanarch.common.schema.FixedWidthSchema;
+import com.example.edicleanarch.railinc.domain.model.ContainerEvent;
+import com.example.edicleanarch.railinc.domain.model.RailincFile;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.JsonNode;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Domain Service: Railinc File Parser
+ * Parses fixed-width Railinc CLM files into domain objects.
+ *
+ * Uses schema configuration from railinc-schema.yml for field positions.
+ */
+
+@Slf4j
+@Component
+
+public class RailincFileParser {
+    private final FixedWidthToJsonConverter jsonConverter;
+    private final RailincSchemaLoader schemaLoader;
+
+
+    /**
+     * Parse Railinc CLM content using schema configuration.
+     */
+    RailincFile parse(String content) {
+        // Load schema from configuration
+        FixedWidthSchema schema = schemaLoader.loadSchema();
+
+        // Convert to JsonNode using schema
+        JsonNode jsonNode = jsonConverter.convert(content, schema);
+
+        // Transform JsonNode to domain objects
+        return transformToDomainObject(jsonNode);
+    }
+
+    /**
+     * Transform JsonNode to RailincFile domain object.
+     */
+    private RailincFile transformToDomainObject(JsonNode jsonNode) {
+        RailincFile.FileHeader header = parseHeader(jsonNode.get("header"));
+        RailincFile.FileTrailer trailer = parseTrailer(jsonNode.get("trailer"));
+        List<ContainerEvent> events = parseDataRecords(jsonNode.get("records"));
+
+        return RailincFile.withoutId(header, events, trailer);
+    }
+
+    /**
+     * Parse header from JsonNode (field names from schema).
+     */
+    private RailincFile.FileHeader parseHeader(JsonNode headerNode) {
+        if (headerNode == null || headerNode.isNull()) {
+            return null;
+        }
+        return new RailincFile.FileHeader(
+                getText(headerNode, "recordType"),
+                getText(headerNode, "messageType"),
+                getText(headerNode, "railroadCode"),
+                getText(headerNode, "partnerName"),
+                getText(headerNode, "sequenceNumber"),
+                null // reserved field
+        );
+    }
+
+
+    /**
+     * Parse trailer from JsonNode.
+     */
+    private RailincFile.FileTrailer parseTrailer(JsonNode trailerNode) {
+        if (trailerNode == null || trailerNode.isNull()) {
+            return null;
+        }
+        String recordCountStr = getText(trailerNode, "recordCount");
+        int recordCount = 0;
+        try {
+            recordCount = Integer.parseInt(recordCountStr);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid record count: {}", recordCountStr);
+        }
+        return new RailincFile.FileTrailer(
+                getText(trailerNode, "recordType"),
+                recordCount
+        );
+    }
+
+    /**
+     * Parse data records from JsonNode array.
+     */
+    private List<ContainerEvent> parseDataRecords(JsonNode recordsNode) {
+        List<ContainerEvent> events = new ArrayList<>();
+        if (recordsNode == null || !recordsNode.isArray()) {
+            return events;
+        }
+
+        for (JsonNode recordNode : recordsNode) {
+            ContainerEvent event = parseDataRecord(recordNode);
+            if (event != null) {
+                events.add(event);
+            }
+        }
+        return events;
+    }
+
+    /**
+     * Parse single data record from JsonNode (field names from schema).
+     */
+    private ContainerEvent parseDataRecord(JsonNode node) {
+        try {
+            ContainerEvent.EquipmentId equipmentId = new ContainerEvent.EquipmentId(
+                    getText(node, "equipmentInitial"),
+                    getText(node, "equipmentNumber"),
+                    getText(node, "equipmentCheckDigit")
+            );
+
+            // Build sighting datetime from components
+            String sightingDateTime = getText(node, "sightingCentury")
+                    + getText(node, "sightingYear")
+                    + getText(node, "sightingMonth")
+                    + getText(node, "sightingDay")
+                    + getText(node, "sightingHour")
+                    + getText(node, "sightingMinute");
+
+            // Build sent datetime from components
+            String sentDateTime = getText(node, "sentCentury")
+                    + getText(node, "sentYear")
+                    + getText(node, "sentMonth")
+                    + getText(node, "sentDay")
+                    + getText(node, "sentHour");
+
+            ContainerEvent.EventInfo eventInfo = new ContainerEvent.EventInfo(
+                    getText(node, "sightingEventCode"),
+                    sightingDateTime,
+                    sentDateTime
+            );
+
+            ContainerEvent.LocationInfo eventLocation = new ContainerEvent.LocationInfo(
+                    getText(node, "sightingCity"),
+                    getText(node, "sightingState"),
+                    getText(node, "sightingSplc")
+            );
+
+            ContainerEvent.LocationInfo origin = new ContainerEvent.LocationInfo(
+                    getText(node, "etaDestinationCity"),
+                    getText(node, "etaDestinationState"),
+                    getText(node, "etaDestinationSplc")
+            );
+
+            ContainerEvent.LocationInfo destination = new ContainerEvent.LocationInfo(
+                    getText(node, "destinationCity"),
+                    getText(node, "destinationState"),
+                    getText(node, "destinationSplc")
+            );
+
+            ContainerEvent.TransportInfo transportInfo = new ContainerEvent.TransportInfo(
+                    getText(node, "loadEmptyStatus"),
+                    getText(node, "trainId"),
+                    getText(node, "headerRailroadScac"),
+                    getText(node, "reportingRailroadScac")
+            );
+
+            // Build ETA datetime from components
+            String etaDateTime = getText(node, "etaCentury")
+                    + getText(node, "etaYear")
+                    + getText(node, "etaMonth")
+                    + getText(node, "etaDay")
+                    + getText(node, "etaHour");
+
+            ContainerEvent.VesselInfo vesselInfo = new ContainerEvent.VesselInfo(
+                    getText(node, "eventTypeCode"),
+                    getText(node, "currentLocationUnlocde"),
+                    getText(node, "destinationLocationUnlocde")
+            );
+
+            String billOfLading = getText(node, "mblNo");
+            String shipperCode = getText(node, "scac");
+
+            return ContainerEvent.withoutId(
+                    equipmentId, billOfLading, eventInfo,
+                    eventLocation, origin, destination,
+                    transportInfo, vesselInfo, shipperCode
+            );
+
+        } catch (Exception e) {
+            log.warn("Error parsing data record: {}", e.getMessage());
+            return null;
+        }
+    }
+    /**
+     * Safely get text value from JsonNode.
+     */
+    private String getText(JsonNode node, String fieldName) {
+        if (node == null || !node.has(fieldName)) {
+            return "";
+        }
+        JsonNode fieldNode = node.get(fieldName);
+        return fieldNode.isNull() ? "" : fieldNode.asText();
+    }
+}

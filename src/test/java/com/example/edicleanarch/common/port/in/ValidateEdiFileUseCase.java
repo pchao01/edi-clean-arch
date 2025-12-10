@@ -1,0 +1,21 @@
+package com.example.edicleanarch.common.port.in;
+
+
+import com.example.edicleanarch.common.model.ProcessingResult;
+
+/**
+ * Common Input Port: Validate EDI File Use Case
+ * Validates file without persisting to database.
+ *
+ * @param <C> The command type
+ */
+public interface ValidateEdiFileUseCase<C> {
+
+    /**
+     * Validate an EDI file without saving.
+     *
+     * @param command The validation command
+     * @return Processing result with validation status
+     */
+    ProcessingResult validateFile(C command);
+}
