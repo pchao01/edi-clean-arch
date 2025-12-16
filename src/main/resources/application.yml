@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: edi-clean-arch
+
+  datasource:
+    url: jdbc:sqlserver://localhost;databaseName=CDB;encrypt=false;trustServerCertificate=true
+    username: sa
+    password: 1111
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+
+  kafka:
+    bootstrap-servers: localhost:9092
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    com.example.edicleanarch: DEBUG
+    org.springframework.kafka: INFO
+
+edi:
+  railinc:
+    kafka:
+      topic: railinc-inbound
+      group-id: railinc-processor-group
+      concurrency: 1

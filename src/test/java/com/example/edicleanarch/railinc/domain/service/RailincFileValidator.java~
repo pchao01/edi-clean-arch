@@ -1,4 +1,0 @@
-package com.example.edicleanarch.railinc.domain.service;
-
-public class RailincFileValidator {
-}

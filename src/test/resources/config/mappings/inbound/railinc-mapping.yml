@@ -1,0 +1,251 @@
+# Railinc CLM Mapping Configuration
+# Config-driven field mapping from FixedWidth JsonNode to CDB_EVENT table
+
+ediType: RAILINC
+description: "Railinc Car Location Message Mapping"
+sourceFormat: FIXED_WIDTH
+version: "1.0"
+
+validations:
+  - rule: HEADER_REQUIRED
+    field: "header.recordType"
+    expectedValue: "CLM"
+    message: "Missing or invalid CLM header"
+
+  - rule: TRAILER_REQUIRED
+    field: "trailer.recordType"
+    expectedValue: "EOM"
+    message: "Missing or invalid EOM trailer"
+
+  - rule: RECORD_COUNT_MATCH
+    actualField: "_metadata.recordCount"
+    expectedField: "trailer.recordCount"
+    message: "Record count mismatch"
+
+  - rule: REQUIRED_FIELD
+    fields: ["records[*].mblNo", "records[*].eventTypeCode"]
+
+targets:
+  # Primary event record
+  - table: CDB_EVENT
+    type: DETAIL
+    loopPath: records
+    description: "Main container event"
+    fields:
+      # Direct mappings
+      - name: MBL_NO
+        source: mblNo
+        type: STRING
+        required: true
+
+      - name: PRTNR_EVENT_CD
+        source: eventTypeCode
+        type: STRING
+
+      - name: EVENT_LOC
+        source: currentLocationUnlocde
+        type: STRING
+
+      - name: SCAC
+        source: scac
+        type: STRING
+
+      - name: RAILROAD_SCAC
+        source: reportingRailroadScac
+        type: STRING
+
+      - name: TRAIN_ID
+        source: trainId
+        type: STRING
+        transform: TRIM_OR_NULL
+
+      # Concatenated container number
+      - name: CNTR_NO
+        source: equipmentInitial
+        type: STRING
+        transform: CONCAT
+        concatFields: ["equipmentNumber", "equipmentCheckDigit"]
+
+      # Computed event date
+      - name: EVENT_DATE
+        type: DATETIME
+        transform: BUILD_DATETIME
+        sourceFields:
+          century: sightingCentury
+          year: sightingYear
+          month: sightingMonth
+          day: sightingDay
+          hour: sightingHour
+          minute: sightingMinute
+        format: "yyyyMMddHHmm"
+
+      # Lookup fields
+      - name: EVENT_CODE
+        type: STRING
+        transform: LOOKUP
+        lookupTable: OEVENTCODE
+        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
+        lookupColumn: EVENT_CODE
+
+      - name: EVENT_DESCP
+        type: STRING
+        transform: LOOKUP
+        lookupTable: OEVENTCODE
+        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
+        lookupColumn: EVENT_DESC
+
+      - name: ID
+        type: INTEGER
+        transform: LOOKUP
+        lookupTable: OEVENTCODE
+        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
+        lookupColumn: EM2_EVENT_ID
+
+      - name: EVENT_LOC_NAME
+        type: STRING
+        transform: LOOKUP
+        lookupTable: CNTR_EVENT_LOCATENAME_MAP
+        lookupKeyExpr: "${currentLocationUnlocde}"
+        lookupColumn: LOCATION_NAME
+
+      # Constants
+      - name: DATE_TYPE
+        type: STRING
+        transform: CONSTANT
+        value: "A"
+
+      - name: DATA_SOURCE
+        type: STRING
+        transform: CONSTANT
+        value: "RAIL"
+
+      - name: STATUS
+        type: STRING
+        transform: CONSTANT
+        value: "A"
+
+      - name: UPDATE_USER
+        type: STRING
+        transform: CONSTANT
+        value: "B2B"
+
+      # Context fields
+      - name: FILENAME
+        source: "context.fileName"
+        type: STRING
+
+      - name: CREATE_DATE
+        type: TIMESTAMP
+        transform: CURRENT_TIMESTAMP
+
+      - name: UPDATE_DATE
+        type: TIMESTAMP
+        transform: CURRENT_TIMESTAMP
+
+  # Synthetic ETA event (conditional)
+  - table: CDB_EVENT
+    type: DETAIL
+    loopPath: records
+    condition: "${etaCentury} != '' && ${etaCentury} != null"
+    description: "Synthetic 0J event for ETA"
+    fields:
+      - name: MBL_NO
+        source: mblNo
+        type: STRING
+
+      - name: CNTR_NO
+        source: equipmentInitial
+        type: STRING
+        transform: CONCAT
+        concatFields: ["equipmentNumber", "equipmentCheckDigit"]
+
+      - name: EVENT_CODE
+        type: STRING
+        transform: CONSTANT
+        value: "0J"
+
+      - name: EVENT_DATE
+        type: DATETIME
+        transform: BUILD_DATETIME
+        sourceFields:
+          century: etaCentury
+          year: etaYear
+          month: etaMonth
+          day: etaDay
+          hour: etaHour
+          minute: "'00'"
+        format: "yyyyMMddHHmm"
+
+      - name: DATE_TYPE
+        type: STRING
+        transform: CONSTANT
+        value: "E"
+
+      - name: EVENT_LOC
+        source: destinationLocationUnlocde
+        type: STRING
+
+      - name: SCAC
+        source: scac
+        type: STRING
+
+      - name: RAILROAD_SCAC
+        source: reportingRailroadScac
+        type: STRING
+
+      - name: DATA_SOURCE
+        type: STRING
+        transform: CONSTANT
+        value: "RAIL"
+
+      - name: STATUS
+        type: STRING
+        transform: CONSTANT
+        value: "A"
+
+      - name: UPDATE_USER
+        type: STRING
+        transform: CONSTANT
+        value: "B2B"
+
+      - name: FILENAME
+        source: "context.fileName"
+        type: STRING
+
+      - name: CREATE_DATE
+        type: TIMESTAMP
+        transform: CURRENT_TIMESTAMP
+
+      - name: UPDATE_DATE
+        type: TIMESTAMP
+        transform: CURRENT_TIMESTAMP
+
+# Partner-specific overrides
+partnerOverrides:
+  PARTNER_A:
+    schemaOverrides:
+      # Different field positions (Map structure)
+      mblNo:
+        start: 140
+        end: 160
+
+    fieldOverrides:
+      - name: SCAC
+        transform: LOOKUP
+        lookupTable: PARTNER_A_SCAC_MAP
+        lookupKeyExpr: "${scac}"
+        lookupColumn: MAPPED_SCAC
+
+  PARTNER_B:
+    schemaOverrides: {}
+    fieldOverrides:
+      - name: EVENT_DATE
+        transform: BUILD_DATETIME
+        sourceFields:
+          century: sentCentury
+          year: sentYear
+          month: sentMonth
+          day: sentDay
+          hour: sentHour
+          minute: "'00'"
+        format: "yyyyMMddHH"
