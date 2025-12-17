@@ -146,11 +146,30 @@ public class RailincMappingConfigLoader {
             field.setSourceFields((Map<String, String>) map.get("sourceFields"));
             field.setFormat((String) map.get("format"));
             field.setLookupTable((String) map.get("lookupTable"));
+            field.setLookupKeyColumn((String) map.get("lookupKeyColumn"));
             field.setLookupKeyExpr((String) map.get("lookupKeyExpr"));
             field.setLookupColumn((String) map.get("lookupColumn"));
+            field.setLookupCondition((String) map.get("lookupCondition"));
+            field.setLookupFallbackCondition((String) map.get("lookupFallbackCondition"));
+            field.setCondition((String) map.get("condition"));
+            field.setSources(parseSourceConfigs((List<Map<String, Object>>) map.get("sources")));
             fields.add(field);
         }
         return fields;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<FieldMapping.SourceConfig> parseSourceConfigs(List<Map<String, Object>> list) {
+        if (list == null) return null;
+        List<FieldMapping.SourceConfig> sources = new ArrayList<>();
+        for (Map<String, Object> map : list) {
+            FieldMapping.SourceConfig config = new FieldMapping.SourceConfig();
+            config.setSource((String) map.get("source"));
+            config.setTransform((String) map.get("transform"));
+            config.setConcatFields((List<String>) map.get("concatFields"));
+            sources.add(config);
+        }
+        return sources;
     }
 
     @SuppressWarnings("unchecked")

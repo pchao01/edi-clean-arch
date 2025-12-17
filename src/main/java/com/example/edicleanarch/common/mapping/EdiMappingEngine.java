@@ -185,7 +185,8 @@ public class EdiMappingEngine {
                 continue;
             }
 
-            Object value = processField(record, effectiveTransaction, field, fullJson, context, loopIndex);
+            // Pass the current result so previously mapped fields can be referenced
+            Object value = processField(record, effectiveTransaction, field, fullJson, context, loopIndex, result);
 
             // Convert type
             value = convertType(value, field.getType(), field.getFormat());
@@ -200,7 +201,7 @@ public class EdiMappingEngine {
      * Process a single field.
      */
     private Object processField(JsonNode record, JsonNode transaction, FieldMapping field, JsonNode fullJson,
-                                ProcessingContext context, int loopIndex) {
+                                ProcessingContext context, int loopIndex, Map<String, Object> outputRecord) {
         String transform = field.getTransform();
 
         // Default to DIRECT if no transform specified
@@ -215,7 +216,7 @@ public class EdiMappingEngine {
         }
 
         TransformContext txContext = new TransformContext(
-                record, transaction, field, fullJson, context, lookupService, loopIndex);
+                record, transaction, field, fullJson, context, lookupService, loopIndex, outputRecord);
 
         return function.apply(txContext);
     }

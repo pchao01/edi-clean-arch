@@ -79,34 +79,62 @@ targets:
           minute: sightingMinute
         format: "yyyyMMddHHmm"
 
-      # Lookup fields
+      # Lookup fields - OEVENTCODE (SCAC_CD='RRDC' for Railinc)
       - name: EVENT_CODE
         type: STRING
         transform: LOOKUP
         lookupTable: OEVENTCODE
-        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
-        lookupColumn: EVENT_CODE
+        lookupCondition: "SCAC_CD = 'RRDC' AND PRTNR_EVENT_CD = '${eventTypeCode}' AND DATE_TYPE = 'A'"
+        lookupColumn: OEC_EVENT_CD
 
       - name: EVENT_DESCP
         type: STRING
         transform: LOOKUP
         lookupTable: OEVENTCODE
-        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
+        lookupCondition: "SCAC_CD = 'RRDC' AND PRTNR_EVENT_CD = '${eventTypeCode}' AND DATE_TYPE = 'A'"
         lookupColumn: EVENT_DESC
 
       - name: ID
         type: INTEGER
         transform: LOOKUP
         lookupTable: OEVENTCODE
-        lookupKeyExpr: "RRDC_${eventTypeCode}_A"
+        lookupCondition: "SCAC_CD = 'RRDC' AND PRTNR_EVENT_CD = '${eventTypeCode}' AND DATE_TYPE = 'A'"
         lookupColumn: EM2_EVENT_ID
 
+      # EVENT_LOC_NAME from CNTR_EVENT_LOCATENAME_MAP
+      # Key: SCAC_CD='RRDC' first, then fallback to SCAC_CD='' if not found
       - name: EVENT_LOC_NAME
         type: STRING
         transform: LOOKUP
         lookupTable: CNTR_EVENT_LOCATENAME_MAP
-        lookupKeyExpr: "${currentLocationUnlocde}"
-        lookupColumn: LOCATION_NAME
+        lookupCondition: "SCAC_CD = 'RRDC' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${currentLocationUnlocde}'"
+        lookupFallbackCondition: "SCAC_CD = '' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${currentLocationUnlocde}'"
+        lookupColumn: EVENT_LOCATE_NAME
+
+      # RETA fields (populated when ETA data exists)
+      - name: RETA_EVENT_LOC
+        source: destinationLocationUnlocde
+        type: STRING
+
+      - name: RETA_EVENT_LOC_NAME
+        type: STRING
+        transform: LOOKUP
+        lookupTable: CNTR_EVENT_LOCATENAME_MAP
+        lookupCondition: "SCAC_CD = 'RRDC' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${destinationLocationUnlocde}'"
+        lookupFallbackCondition: "SCAC_CD = '' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${destinationLocationUnlocde}'"
+        lookupColumn: EVENT_LOCATE_NAME
+
+      - name: RETA_EVENT_DATE
+        type: DATETIME
+        transform: BUILD_DATETIME
+        sourceFields:
+          century: etaCentury
+          year: etaYear
+          month: etaMonth
+          day: etaDay
+          hour: etaHour
+          minute: "'00'"
+        format: "yyyyMMddHHmm"
 
       # Constants
       - name: DATE_TYPE
@@ -184,6 +212,14 @@ targets:
       - name: EVENT_LOC
         source: destinationLocationUnlocde
         type: STRING
+
+      - name: EVENT_LOC_NAME
+        type: STRING
+        transform: LOOKUP
+        lookupTable: CNTR_EVENT_LOCATENAME_MAP
+        lookupCondition: "SCAC_CD = 'RRDC' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${destinationLocationUnlocde}'"
+        lookupFallbackCondition: "SCAC_CD = '' AND LOCATE_TYPE = 'UN' AND EVENT_LOCATE = '${destinationLocationUnlocde}'"
+        lookupColumn: EVENT_LOCATE_NAME
 
       - name: SCAC
         source: scac

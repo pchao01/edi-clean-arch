@@ -56,8 +56,25 @@ class Edi315SqlServerIntegrationTest {
     private static final String TARGET_TABLE = "CDB_EVENT";
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() throws IOException, SQLException {
+        cleanupTestData();
         sampleEdi315Content = loadEdiFile(EDI_FILE_PATH);
+    }
+
+    /**
+     * Delete existing test data before each test run to ensure clean state.
+     */
+    private void cleanupTestData() throws SQLException {
+        try (Connection conn = dataSource.getConnection();
+             Statement stmt = conn.createStatement()) {
+
+            int deleted = stmt.executeUpdate(
+                    "DELETE FROM " + TARGET_TABLE + " WHERE FILENAME = '" + FILE_NAME + "'");
+
+            if (deleted > 0) {
+                System.out.println("[Setup] Cleaned up " + deleted + " existing records for file: " + FILE_NAME);
+            }
+        }
     }
 
     private String loadEdiFile(String resourcePath) throws IOException {
@@ -119,27 +136,48 @@ class Edi315SqlServerIntegrationTest {
 
     private void verifyDatabaseRecords() throws SQLException {
         try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery(
-                     "SELECT TOP 5 CNTR_NO, MBL_NO, EVENT_CODE, EVENT_LOC, FILENAME " +
-                     "FROM " + TARGET_TABLE + " " +
-                     "WHERE FILENAME = '" + FILE_NAME + "' " +
-                     "ORDER BY CREATE_DATE DESC")) {
+             Statement stmt = conn.createStatement()) {
+
+            // Query with all key fields
+            ResultSet rs = stmt.executeQuery(
+                    "SELECT TOP 5 CNTR_NO, MBL_NO, EVENT_CODE, EVENT_DATE, EVENT_LOC, VESSEL, VOYAGE, BKG_NO " +
+                    "FROM " + TARGET_TABLE + " " +
+                    "WHERE FILENAME = '" + FILE_NAME + "' " +
+                    "ORDER BY CREATE_DATE DESC");
 
             int count = 0;
             System.out.println("   Sample records from CDB_EVENT:");
             while (rs.next()) {
                 count++;
-                System.out.printf("     [%d] CNTR: %s, MBL: %s, EVENT: %s, LOC: %s%n",
+                System.out.printf("     [%d] CNTR: %s, MBL: %s, EVENT_CODE: %s, EVENT_DATE: %s, LOC: %s, VESSEL: %s%n",
                         count,
                         rs.getString("CNTR_NO"),
                         rs.getString("MBL_NO"),
                         rs.getString("EVENT_CODE"),
-                        rs.getString("EVENT_LOC"));
+                        rs.getString("EVENT_DATE"),
+                        rs.getString("EVENT_LOC"),
+                        rs.getString("VESSEL"));
             }
+            rs.close();
 
             assertTrue(count > 0, "Should have records in database");
             System.out.println("   Total verified: " + count + " records (showing top 5)");
+
+            // Also query first container from the EDI file (CAXU3368411)
+            ResultSet rs2 = stmt.executeQuery(
+                    "SELECT CNTR_NO, MBL_NO, EVENT_CODE, EVENT_DATE, EVENT_LOC " +
+                    "FROM " + TARGET_TABLE + " " +
+                    "WHERE FILENAME = '" + FILE_NAME + "' AND CNTR_NO LIKE 'CAXU336841%'");
+
+            System.out.println("\n   Checking first container (CAXU336841*):");
+            while (rs2.next()) {
+                System.out.printf("     CNTR: %s, EVENT_CODE: %s, EVENT_DATE: %s, LOC: %s%n",
+                        rs2.getString("CNTR_NO"),
+                        rs2.getString("EVENT_CODE"),
+                        rs2.getString("EVENT_DATE"),
+                        rs2.getString("EVENT_LOC"));
+            }
+            rs2.close();
         }
     }
 

@@ -18,9 +18,16 @@ public class TransformContext {
     private final ProcessingContext processingContext;
     private final LookupService lookupService;
     private final int loopIndex;
+    private final java.util.Map<String, Object> outputRecord;  // Current output record being built
 
     public TransformContext(JsonNode record, JsonNode transaction, FieldMapping field, JsonNode fullJson,
                             ProcessingContext processingContext, LookupService lookupService, int loopIndex) {
+        this(record, transaction, field, fullJson, processingContext, lookupService, loopIndex, null);
+    }
+
+    public TransformContext(JsonNode record, JsonNode transaction, FieldMapping field, JsonNode fullJson,
+                            ProcessingContext processingContext, LookupService lookupService, int loopIndex,
+                            java.util.Map<String, Object> outputRecord) {
         this.record = record;
         this.transaction = transaction;
         this.field = field;
@@ -28,6 +35,7 @@ public class TransformContext {
         this.processingContext = processingContext;
         this.lookupService = lookupService;
         this.loopIndex = loopIndex;
+        this.outputRecord = outputRecord;
     }
 
     /**
@@ -40,6 +48,7 @@ public class TransformContext {
      * - header.field - header value (fixed-width)
      * - B4.07 - transaction segment value (X12)
      * - 03 - current loop element value (R4 element)
+     * - scac - previously mapped field value (case-insensitive)
      */
     public String getStringValue(String fieldName) {
         if (fieldName == null) return null;
@@ -82,6 +91,21 @@ public class TransformContext {
             JsonNode segment = transaction.get(segmentId);
             if (segment != null) {
                 return getJsonText(segment, elementId);
+            }
+        }
+
+        // Check output record for previously mapped field (case-insensitive)
+        if (outputRecord != null) {
+            // Try exact match first
+            Object val = outputRecord.get(fieldName);
+            if (val != null) {
+                return val.toString();
+            }
+            // Try case-insensitive match (e.g., "scac" matches "SCAC")
+            for (java.util.Map.Entry<String, Object> entry : outputRecord.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(fieldName) && entry.getValue() != null) {
+                    return entry.getValue().toString();
+                }
             }
         }
 

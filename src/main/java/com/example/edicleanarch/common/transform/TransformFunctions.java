@@ -1,6 +1,7 @@
 package com.example.edicleanarch.common.transform;
 
 
+import com.example.edicleanarch.common.mapping.FieldMapping;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.springframework.stereotype.Component;
 
@@ -118,18 +119,43 @@ public class TransformFunctions {
             return value != null ? value.toUpperCase() : null;
         });
 
-        // LOOKUP - Database lookup
+        // LOOKUP - Database lookup (supports single-column or multi-column condition with fallback)
         functions.put("LOOKUP", ctx -> {
-            String keyExpr = ctx.getField().getLookupKeyExpr();
-            String resolvedKey = resolveExpression(keyExpr, ctx.getRecord());
-
             if (ctx.getLookupService() == null) return null;
 
-            return ctx.getLookupService().lookup(
-                    ctx.getField().getLookupTable(),
-                    resolvedKey,
-                    ctx.getField().getLookupColumn()
-            );
+            String lookupCondition = ctx.getField().getLookupCondition();
+            Object result = null;
+
+            if (lookupCondition != null && !lookupCondition.isEmpty()) {
+                // Multi-column lookup using WHERE condition
+                String resolvedCondition = resolveExpression(lookupCondition, ctx);
+                result = ctx.getLookupService().lookupWithCondition(
+                        ctx.getField().getLookupTable(),
+                        resolvedCondition,
+                        ctx.getField().getLookupColumn()
+                );
+
+                // Try fallback condition if primary lookup returns null
+                if (result == null && ctx.getField().getLookupFallbackCondition() != null) {
+                    String fallbackCondition = resolveExpression(ctx.getField().getLookupFallbackCondition(), ctx);
+                    result = ctx.getLookupService().lookupWithCondition(
+                            ctx.getField().getLookupTable(),
+                            fallbackCondition,
+                            ctx.getField().getLookupColumn()
+                    );
+                }
+            } else {
+                // Single-column lookup using key expression
+                String keyExpr = ctx.getField().getLookupKeyExpr();
+                String resolvedKey = resolveExpression(keyExpr, ctx);
+                result = ctx.getLookupService().lookup(
+                        ctx.getField().getLookupTable(),
+                        ctx.getField().getLookupKeyColumn(),
+                        resolvedKey,
+                        ctx.getField().getLookupColumn()
+                );
+            }
+            return result;
         });
 
         // QUALIFIED_SEGMENT - Extract from qualified segment like N9[01=BM].02
@@ -139,6 +165,69 @@ public class TransformFunctions {
             // Use transaction for X12 segments like N9, B4; fall back to record if transaction is null
             JsonNode searchNode = ctx.getTransaction() != null ? ctx.getTransaction() : ctx.getRecord();
             return extractQualifiedValue(source, searchNode, ctx.getLoopIndex());
+        });
+
+        // COALESCE - Return first non-empty value from multiple sources
+        functions.put("COALESCE", ctx -> {
+            List<FieldMapping.SourceConfig> sources = ctx.getField().getSources();
+            if (sources == null || sources.isEmpty()) return null;
+
+            JsonNode searchNode = ctx.getTransaction() != null ? ctx.getTransaction() : ctx.getRecord();
+
+            for (FieldMapping.SourceConfig sourceConfig : sources) {
+                Object value = null;
+
+                if (sourceConfig.getConcatFields() != null && !sourceConfig.getConcatFields().isEmpty()) {
+                    // Concat multiple fields
+                    StringBuilder sb = new StringBuilder();
+                    for (String field : sourceConfig.getConcatFields()) {
+                        String val = ctx.getStringValue(field);
+                        if (val != null) sb.append(val);
+                    }
+                    value = sb.length() > 0 ? sb.toString() : null;
+                } else if (sourceConfig.getSource() != null) {
+                    // Apply transform if specified
+                    if ("QUALIFIED_SEGMENT".equals(sourceConfig.getTransform())) {
+                        value = extractQualifiedValue(sourceConfig.getSource(), searchNode, ctx.getLoopIndex());
+                    } else {
+                        value = ctx.getStringValue(sourceConfig.getSource());
+                    }
+                }
+
+                if (value != null && !value.toString().isEmpty()) {
+                    return value;
+                }
+            }
+            return null;
+        });
+
+        // BOOKNO_FLAG - "" if N9_BM exists, "X" if only N9_BN exists
+        functions.put("BOOKNO_FLAG", ctx -> {
+            JsonNode searchNode = ctx.getTransaction() != null ? ctx.getTransaction() : ctx.getRecord();
+            Object bmValue = extractQualifiedValue("N9[01=BM].02", searchNode, ctx.getLoopIndex());
+            if (bmValue != null && !bmValue.toString().isEmpty()) {
+                return "";  // N9_BM exists
+            }
+            Object bnValue = extractQualifiedValue("N9[01=BN].02", searchNode, ctx.getLoopIndex());
+            if (bnValue != null && !bnValue.toString().isEmpty()) {
+                return "X";  // Only N9_BN exists
+            }
+            return null;  // Neither exists
+        });
+
+        // ID_MAP_FLAG - From R4.01: "D" if "1", "T" if "Y" or null, else R4.01
+        functions.put("ID_MAP_FLAG", ctx -> {
+            String r401 = ctx.getStringValue(ctx.getField().getSource());
+            if (r401 == null || r401.isEmpty()) {
+                return "T";
+            }
+            if ("1".equals(r401)) {
+                return "D";
+            }
+            if ("Y".equals(r401)) {
+                return "T";
+            }
+            return r401;
         });
     }
 
@@ -150,23 +239,21 @@ public class TransformFunctions {
     }
 
     /**
-     * Resolve ${fieldName} expressions in string.
+     * Resolve ${path} expressions in string.
+     * Supports dot-notation paths like ${envelope.ISA.06}, ${B4.03}, ${context.fileName}
      */
-    private String resolveExpression(String expr, JsonNode record) {
+    private String resolveExpression(String expr, TransformContext ctx) {
         if (expr == null) return null;
 
-        Pattern pattern = Pattern.compile("\\$\\{(\\w+)\\}");
+        // Match ${...} including dot-notation paths
+        Pattern pattern = Pattern.compile("\\$\\{([^}]+)\\}");
         Matcher matcher = pattern.matcher(expr);
         StringBuffer result = new StringBuffer();
 
         while (matcher.find()) {
-            String fieldName = matcher.group(1);
-            String value = "";
-            if (record.has(fieldName)) {
-                JsonNode node = record.get(fieldName);
-                value = node.isNull() ? "" : node.asText();
-            }
-            matcher.appendReplacement(result, Matcher.quoteReplacement(value));
+            String fieldPath = matcher.group(1);
+            String value = ctx.getStringValue(fieldPath);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(value != null ? value : ""));
         }
         matcher.appendTail(result);
 

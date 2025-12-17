@@ -2,7 +2,24 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(gh:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(./gradlew compileTestJava:*)",
+      "Bash(./gradlew compileJava:*)",
+      "Bash(./gradlew test:*)",
+      "Bash(cat:*)",
+      "Bash(find:*)",
+      "Bash(git checkout:*)",
+      "Bash(./gradlew clean test:*)",
+      "Bash(git reset:*)",
+      "Bash(xargs rm:*)",
+      "Bash(git push:*)"
+    ],
+    "additionalDirectories": [
+      "C:\\oec\\edi\\edi-processor\\docs\\code",
+      "C:\\oec\\edi\\edi-processor",
+      "C:\\oec\\edi\\edi-system-design\\Project_Design\\EDI\\edi-processor"
     ]
   }
 }
